@@ -19,11 +19,27 @@
 #include <linux/kernel.h>
 #include <linux/stringify.h>
 #include <linux/ctype.h>
+#ifdef CONFIG_MTD
+#include <linux/mtd/mtd.h>
+#include <linux/mtd/nand.h>
+#include <linux/mtd/spi-nor.h>
+#include <linux/mtd/spinand.h>
+#endif
 #include <limits.h>
 #include <dm/ofnode.h>
 #include <vsprintf.h>
 #include <version_string.h>
 #include <failsafe/fw_type.h>
+
+int __weak failsafe_validate_image(const void *data, size_t size, failsafe_fw_t fw)
+{
+	return 0;
+}
+
+int __weak failsafe_write_image(const void *data, size_t size, failsafe_fw_t fw)
+{
+	return -ENOSYS;
+}
 
 #include "../board/mediatek/common/boot_helper.h"
 #ifdef CONFIG_MTD
@@ -37,12 +53,18 @@
 static u32 upload_data_id;
 static const void *upload_data;
 
-static u32 upload_id;
+/*
+ * mtk_httpd exposes a global symbol named `upload_id`.
+ * Avoid colliding with it by using a failsafe-local name.
+ */
+static u32 fs_upload_id;
 static size_t upload_size;
 static failsafe_fw_t fw_type;
 static bool upgrade_success;
 #ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
 static const char *mtd_layout_label;
+const char *get_mtd_layout_label(void);
+#define MTD_LAYOUTS_MAXLEN 128
 #endif
 
 static int output_plain_file(struct httpd_response *response, const char *path)
@@ -227,6 +249,103 @@ static bool mtd_part_exists(const char *name)
 #endif
 }
 
+#ifdef CONFIG_MTD
+static const struct spinand_info *failsafe_spinand_match_info(struct spinand_device *spinand)
+{
+	size_t i;
+	const struct spinand_manufacturer *manufacturer;
+	const u8 *id;
+
+	if (!spinand)
+		return NULL;
+
+	manufacturer = spinand->manufacturer;
+	if (!manufacturer || !manufacturer->chips || !manufacturer->nchips)
+		return NULL;
+
+	id = spinand->id.data;
+
+	for (i = 0; i < manufacturer->nchips; i++) {
+		const struct spinand_info *info = &manufacturer->chips[i];
+
+		if (!info->devid.id || !info->devid.len)
+			continue;
+
+		/* spinand->id.data[0] is manufacturer ID, device ID starts from [1]. */
+		if (spinand->id.len < (int)(1 + info->devid.len))
+			continue;
+
+		if (!memcmp(id + 1, info->devid.id, info->devid.len))
+			return info;
+	}
+
+	return NULL;
+}
+
+static const char *failsafe_get_mtd_chip_model(struct mtd_info *mtd, char *out, size_t out_sz)
+{
+	if (!out || !out_sz)
+		return "";
+
+	out[0] = '\0';
+
+	if (!mtd)
+		return "";
+
+	/* SPI NOR: mtd->priv points to struct spi_nor (see spi-nor-core.c). */
+	if (mtd->type == MTD_NORFLASH) {
+		struct spi_nor *nor = mtd->priv;
+
+		if (nor && nor->name && nor->name[0]) {
+			snprintf(out, out_sz, "%s", nor->name);
+			return out;
+		}
+	}
+
+#if IS_ENABLED(CONFIG_MTD_SPI_NAND)
+	/* SPI NAND: mtd->priv points to struct nand_device embedded in spinand_device. */
+	if (mtd->type == MTD_NANDFLASH || mtd->type == MTD_MLCNANDFLASH) {
+		struct spinand_device *spinand = mtd_to_spinand(mtd);
+		const struct spinand_manufacturer *manufacturer;
+		const struct spinand_info *info;
+		const char *mname = NULL;
+		const char *model = NULL;
+
+		if (spinand) {
+			manufacturer = spinand->manufacturer;
+			info = failsafe_spinand_match_info(spinand);
+
+			if (manufacturer && manufacturer->name && manufacturer->name[0])
+				mname = manufacturer->name;
+			if (info && info->model && info->model[0])
+				model = info->model;
+
+			if (mname && model) {
+				snprintf(out, out_sz, "%s %s", mname, model);
+				return out;
+			}
+			if (model) {
+				snprintf(out, out_sz, "%s", model);
+				return out;
+			}
+			if (mname) {
+				snprintf(out, out_sz, "%s", mname);
+				return out;
+			}
+		}
+	}
+#endif
+
+	/* Fallback: keep old behavior. */
+	if (mtd->name && mtd->name[0]) {
+		snprintf(out, out_sz, "%s", mtd->name);
+		return out;
+	}
+
+	return "";
+}
+#endif
+
 static void backupinfo_handler(enum httpd_uri_handler_status status,
 			       struct httpd_request *request,
 			       struct httpd_response *response)
@@ -316,21 +435,45 @@ static void backupinfo_handler(enum httpd_uri_handler_status status,
 	len += snprintf(buf + len, left - len, "\"mtd\":{");
 #ifdef CONFIG_MTD
 	{
-		struct mtd_info *mtd;
+		struct mtd_info *mtd, *sel = NULL;
 		u32 i;
 		bool first = true;
 		const char *model = NULL;
+		char model_buf[128];
 		int type = -1;
 		bool present = false;
 
 		gen_mtd_probe_devices();
 
-		mtd = get_mtd_device(NULL, 0);
-		if (!IS_ERR(mtd)) {
+		/* Prefer a master MTD device (mtd->parent == NULL) for chip model info. */
+		for (i = 0; i < 64; i++) {
+			mtd = get_mtd_device(NULL, i);
+			if (IS_ERR(mtd))
+				continue;
+
+			if (!sel) {
+				sel = mtd;
+			} else {
+				if (mtd->parent) {
+					put_mtd_device(mtd);
+					continue;
+				}
+
+				/* Found master: replace current selection. */
+				put_mtd_device(sel);
+				sel = mtd;
+				break;
+			}
+
+			if (!mtd->parent)
+				break;
+		}
+
+		if (sel && !IS_ERR(sel)) {
 			present = true;
-			model = mtd->name;
-			type = mtd->type;
-			put_mtd_device(mtd);
+			type = sel->type;
+			model = failsafe_get_mtd_chip_model(sel, model_buf, sizeof(model_buf));
+			put_mtd_device(sel);
 		}
 
 		len += snprintf(buf + len, left - len,
@@ -696,7 +839,7 @@ static void upload_handler(enum httpd_uri_handler_status status,
 		return;
 
 	/* new upload session identifier */
-	upload_id = rand();
+	fs_upload_id = rand();
 #ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
 	mtd_layout_label = NULL;
 #endif
@@ -763,7 +906,7 @@ fail:
 	return;
 
 done:
-	upload_data_id = upload_id;
+	upload_data_id = fs_upload_id;
 	upload_data = fw->data;
 	upload_size = fw->size;
 
@@ -842,7 +985,7 @@ static void result_handler(enum httpd_uri_handler_status status,
 			return;
 		}
 
-		if (upload_data_id == upload_id) {
+		if (upload_data_id == fs_upload_id) {
 #ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
 			if (mtd_layout_label &&
 					strcmp(get_mtd_layout_label(), mtd_layout_label) != 0) {
@@ -927,6 +1070,7 @@ static void html_handler(enum httpd_uri_handler_status status,
 }
 
 #ifdef CONFIG_MEDIATEK_MULTI_MTD_LAYOUT
+
 static const char *get_mtdlayout_str(void)
 {
 	static char mtd_layout_str[MTD_LAYOUTS_MAXLEN];

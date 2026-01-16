@@ -37,6 +37,7 @@ function setLang(n) {
         localStorage.setItem("lang", APP_STATE.lang)
     } catch (t) { }
     applyI18n(document);
+    typeof backupRefreshI18n == "function" && APP_STATE.page === "backup" && backupRefreshI18n();
     updateDocumentTitle()
 }
 
@@ -203,14 +204,50 @@ function backupUpdateRangeHint() {
     u && (n = parseUserLen(document.getElementById("backup_start").value), i = parseUserLen(document.getElementById("backup_end").value), n === null || i === null ? u.textContent = t("backup.range.hint") : (r = i >= n ? i - n : 0, u.textContent = "Start=" + bytesToHuman(n) + ", End=" + bytesToHuman(i) + ", Size=" + bytesToHuman(r)))
 }
 
+function backupRefreshI18n() {
+    var n = document.getElementById("backup_target"), t, r, u;
+    if (!n) return;
+    for (t = 0; t < n.options.length; t++) r = n.options[t], r && r.dataset && r.dataset.i18nKey && (r.textContent = window.t(r.dataset.i18nKey));
+    for (t = 0; t < n.options.length; t++) {
+        r = n.options[t];
+        if (!r || !r.dataset) continue;
+        r.dataset.kind === "mtd-full" && (u = r.dataset.mtdName || "", r.textContent = "[MTD] " + window.t("backup.target.full_disk") + (u ? " (" + u + ")" : "") + (r.dataset.size ? " (" + bytesToHuman(parseInt(r.dataset.size, 10)) + ")" : ""))
+    }
+}
+
 function backupInit() {
-    var u = document.getElementById("backup_mode"), r = document.getElementById("backup_range"), n = document.getElementById("backup_target"), i, f, e;
-    u && r && n && (i = function () {
-        u.value === "range" ? (r.style.display = "block", backupUpdateRangeHint()) : (r.style.display = "none")
-    }, u.onchange = i, f = document.getElementById("backup_start"), e = document.getElementById("backup_end"), f && (f.oninput = backupUpdateRangeHint), e && (e.oninput = backupUpdateRangeHint), i(), setBackupStatus(""), ajax({
+    var u = document.getElementById("backup_mode"), r = document.getElementById("backup_range"), n = document.getElementById("backup_target"), s = document.getElementById("backup_target_field"), c = document.getElementById("backup_mode_target_row"), updateBackupUi, f, e;
+    function o(t) {
+        for (var i = 0; i < n.options.length; i++) if (n.options[i].value === t) return n.selectedIndex = i, true;
+        return false
+    }
+    function h(t) {
+        for (var i = 0; i < n.options.length; i++) if (n.options[i].dataset && n.options[i].dataset.kind === t) return n.selectedIndex = i, true;
+        return false
+    }
+    function l() {
+        for (var t = 0; t < n.options.length; t++) if (n.options[t].value) {
+            n.selectedIndex = t;
+            return true
+        }
+        return false
+    }
+    function a() {
+        var t, i;
+        if (!n || n.options.length <= 1) return;
+        t = n.options[n.selectedIndex];
+        i = t && t.dataset ? t.dataset.kind : "";
+        (i === "mmc-part" || i === "mtd-part" || !n.value) && (o("mmc:raw") || h("mtd-full") || l())
+    }
+    u && r && n && (updateBackupUi = function () {
+        var t = u.value === "range";
+        t ? (r.style.display = "block", a(), backupUpdateRangeHint()) : (r.style.display = "none");
+        s && (s.style.display = t ? "none" : "");
+        c && (c.style.gridTemplateColumns = t ? "1fr" : "")
+    }, u.onchange = updateBackupUi, f = document.getElementById("backup_start"), e = document.getElementById("backup_end"), f && (f.oninput = backupUpdateRangeHint), e && (e.oninput = backupUpdateRangeHint), updateBackupUi(), setBackupStatus(""), ajax({
         url: "/backupinfo",
         done: function (u) {
-            var r, e, o, s, f, i;
+            var r, e, o, s, f;
             try {
                 r = JSON.parse(u)
             } catch (h) {
@@ -222,17 +259,42 @@ function backupInit() {
             n.options.length = 0;
             s = document.createElement("option");
             s.value = "";
-            s.textContent = t("backup.target.placeholder");
+            s.dataset.i18nKey = "backup.target.placeholder";
             n.appendChild(s);
-            r.mmc && r.mmc.present && (f = document.createElement("option"), f.value = "mmc:raw", f.textContent = "[MMC] raw", n.appendChild(f), r.mmc.parts && r.mmc.parts.length && r.mmc.parts.forEach(function (t) {
+            r.mmc && r.mmc.present && (f = document.createElement("option"), f.value = "mmc:raw", f.textContent = "[MMC] raw", f.dataset.kind = "mmc-raw", n.appendChild(f), r.mmc.parts && r.mmc.parts.length && r.mmc.parts.forEach(function (t) {
                 var i;
-                t && t.name && (i = document.createElement("option"), i.value = "mmc:" + t.name, i.textContent = "[MMC] " + t.name + (t.size ? " (" + bytesToHuman(t.size) + ")" : ""), n.appendChild(i))
+                t && t.name && (i = document.createElement("option"), i.value = "mmc:" + t.name, i.textContent = "[MMC] " + t.name + (t.size ? " (" + bytesToHuman(t.size) + ")" : ""), i.dataset.kind = "mmc-part", n.appendChild(i))
             }));
-            r.mtd && r.mtd.present && r.mtd.parts && r.mtd.parts.length && r.mtd.parts.forEach(function (t) {
-                var i;
-                t && t.name && (i = document.createElement("option"), i.value = "mtd:" + t.name, i.textContent = "[MTD] " + t.name + (t.size ? " (" + bytesToHuman(t.size) + ")" : ""), n.appendChild(i))
-            });
-            n.options.length > 1 && (n.selectedIndex = 1)
+
+            if (r.mtd && r.mtd.present && r.mtd.parts && r.mtd.parts.length) {
+                var c = r.mtd.type, l = c === 3 || c === 4 || c === 8, a = [];
+                l && r.mtd.parts.forEach(function (n) {
+                    n && n.name && n.master && a.push(n)
+                });
+
+                l && a.length && a.forEach(function (p) {
+                    var i = document.createElement("option");
+                    i.value = "mtd:" + p.name;
+                    i.dataset.mtdName = p.name;
+                    i.dataset.size = p.size ? String(p.size) : "";
+                    i.dataset.kind = "mtd-full";
+                    n.appendChild(i)
+                });
+
+                r.mtd.parts.forEach(function (t) {
+                    var i;
+                    if (!t || !t.name) return;
+                    if (l && t.master) return;
+                    i = document.createElement("option");
+                    i.value = "mtd:" + t.name;
+                    i.textContent = "[MTD] " + t.name + (t.size ? " (" + bytesToHuman(t.size) + ")" : "");
+                    i.dataset.kind = "mtd-part";
+                    n.appendChild(i)
+                })
+            }
+            n.options.length > 1 && (n.selectedIndex = 1);
+            backupRefreshI18n();
+            updateBackupUi && updateBackupUi()
         }
     }))
 }
@@ -241,7 +303,7 @@ async function startBackup() {
     var u = document.getElementById("backup_mode"), f = document.getElementById("backup_target"), i, r, e, o, s, h, c, l, a, v, y, p, w, b, k;
     if (!u || !f) return;
     if (i = u.value, r = f.value, !r) {
-        setBackupStatus(t("backup.error.no_target"));
+        alert(t("backup.error.no_target"));
         return
     }
     e = new FormData;
@@ -252,7 +314,7 @@ async function startBackup() {
         o = document.getElementById("backup_start");
         s = document.getElementById("backup_end");
         if (!o || !s || !o.value || !s.value) {
-            setBackupStatus(t("backup.error.bad_range"));
+            alert(t("backup.error.bad_range"));
             return
         }
         e.append("start", o.value);
@@ -369,7 +431,7 @@ var I18N = {
         "gpt.warn.3": "you can upload whatever you want, so be sure that you choose proper GPT for your device",
         "gpt.warn.4": "updating GPT is a dangerous operation and may damage your device!",
         "factory.title": "FACTORY UPDATE",
-        "factory.hint": "You are going to update <strong>factory</strong> partition on the device.<br>Please, choose file from your local hard drive and click <strong>Upload</strong> button.",
+        "factory.hint": "You are going to update <strong>Factory (Wireless Calibration)</strong> partition on the device.<br>Please, choose file from your local hard drive and click <strong>Upload</strong> button.",
         "factory.upgrade_hint": 'If all information above is correct, click "Update".',
         "factory.warn.1": "do not power off the device during update",
         "factory.warn.2": "if everything goes well, the device will restart",
@@ -391,6 +453,7 @@ var I18N = {
         "backup.warn.3": "large backups may take a long time depending on storage speed",
         "backup.storage.not_present": "not present",
         "backup.target.placeholder": "-- select --",
+        "backup.target.full_disk": "Full flash",
         "backup.range.hint": "Tip: input supports decimal, 0xHEX, and KiB suffix (e.g. 64KiB).",
         "backup.status.starting": "Starting...",
         "backup.status.downloading": "Downloading:",
@@ -474,7 +537,7 @@ var I18N = {
         "gpt.warn.3": "你可以上传任意文件，请确保选择了与你的设备匹配的 GPT",
         "gpt.warn.4": "更新 GPT 有风险，可能导致设备损坏！",
         "factory.title": "Factory 分区更新",
-        "factory.hint": "你将要在设备上更新 <strong>factory</strong> 分区。<br>请选择本地文件并点击 <strong>上传</strong> 按钮。",
+        "factory.hint": "你将要在设备上更新 <strong>Factory(无线校准)</strong> 分区。<br>请选择本地文件并点击 <strong>上传</strong> 按钮。",
         "factory.upgrade_hint": "如果以上信息确认无误，请点击“更新”。",
         "factory.warn.1": "刷写过程中请勿断电",
         "factory.warn.2": "如果一切顺利，设备会自动重启",
@@ -496,6 +559,7 @@ var I18N = {
         "backup.warn.3": "大容量备份可能耗时较长，取决于存储速度",
         "backup.storage.not_present": "未检测到",
         "backup.target.placeholder": "-- 请选择 --",
+        "backup.target.full_disk": "全盘备份",
         "backup.range.hint": "提示：支持十进制、0x 十六进制，以及 KiB 后缀（例如 64KiB）。",
         "backup.status.starting": "开始中…",
         "backup.status.downloading": "下载中：",
