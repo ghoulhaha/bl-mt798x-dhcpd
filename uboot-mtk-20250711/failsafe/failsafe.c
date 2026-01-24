@@ -157,9 +157,18 @@ static size_t json_escape(char *dst, size_t dst_sz, const char *src)
 			continue;
 		}
 
+		if (c == '\n' || c == '\r' || c == '\t')
+		{
+			if (di + 2 >= dst_sz)
+				break;
+			dst[di++] = '\\';
+			dst[di++] = (c == '\n') ? 'n' : (c == '\r') ? 'r' : 't';
+			continue;
+		}
+
 		if (c < 0x20)
 		{
-			/* skip control chars */
+			/* skip other control chars */
 			dst[di++] = ' ';
 			continue;
 		}
@@ -174,6 +183,20 @@ static size_t json_escape(char *dst, size_t dst_sz, const char *src)
 #ifdef CONFIG_WEBUI_FAILSAFE_CONSOLE
 #define WEB_CONSOLE_CMD_MAX	256
 #define WEB_CONSOLE_POLL_MAX	2048
+
+static const char *failsafe_get_prompt(void)
+{
+	const char *p = env_get("prompt");
+
+	if (p && p[0])
+		return p;
+
+#ifdef CONFIG_SYS_PROMPT
+	return CONFIG_SYS_PROMPT;
+#else
+	return "MTK> ";
+#endif
+}
 
 static void failsafe_webconsole_free_session(enum httpd_uri_handler_status status,
 	struct httpd_response *response)
@@ -380,7 +403,16 @@ static void webconsole_exec_handler(enum httpd_uri_handler_status status,
 	memcpy(cmd, cmdv->data, min((size_t)WEB_CONSOLE_CMD_MAX, cmdv->size));
 
 	/* Echo to console so browser sees what was executed */
-	printf("\nweb> %s\n", cmd);
+	{
+		const char *prompt = failsafe_get_prompt();
+		size_t plen = prompt ? strlen(prompt) : 0;
+		bool need_space = plen && prompt[plen - 1] != ' ' && prompt[plen - 1] != '\t';
+
+		if (!prompt || !prompt[0])
+			prompt = "MTK> ";
+
+		printf("%s%s%s\n", prompt, need_space ? " " : "", cmd);
+	}
 	ret = run_command(cmd, 0);
 
 	esc_sz = strlen(cmd) * 2 + 64;

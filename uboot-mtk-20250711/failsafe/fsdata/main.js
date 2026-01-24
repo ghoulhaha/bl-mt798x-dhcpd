@@ -106,6 +106,8 @@ function consoleInit() {
     var cmd = document.getElementById("console_cmd");
     var status = document.getElementById("console_status");
     var token = document.getElementById("console_token");
+    var persistKey = "failsafe_console_output";
+    var persistMax = 200000;
 
     APP_STATE.console = APP_STATE.console || {
         running: false,
@@ -132,10 +134,31 @@ function consoleInit() {
         status && (status.textContent = t || "");
     }
 
+    function loadPersistedOutput() {
+        if (!out) return;
+        try {
+            var s = sessionStorage.getItem(persistKey);
+            if (s) out.textContent = s;
+        } catch (e) { }
+    }
+
+    function savePersistedOutput() {
+        if (!out) return;
+        try {
+            var s = out.textContent || "";
+            if (s.length > persistMax)
+                s = s.slice(s.length - persistMax);
+            sessionStorage.setItem(persistKey, s);
+        } catch (e) { }
+    }
+
     function appendText(t) {
         if (!out) return;
         if (!t) return;
         out.textContent += t;
+        if (out.textContent.length > persistMax)
+            out.textContent = out.textContent.slice(out.textContent.length - persistMax);
+        savePersistedOutput();
         out.scrollTop = out.scrollHeight;
     }
 
@@ -210,6 +233,7 @@ function consoleInit() {
             var r = await fetch("/console/clear", { method: "POST", body: fd });
             if (r.ok) {
                 out && (out.textContent = "");
+                try { sessionStorage.removeItem(persistKey); } catch (e) { }
                 setStatus(t("console.status.cleared"));
             } else {
                 setStatus(t("console.status.http") + " " + r.status);
@@ -246,6 +270,7 @@ function consoleInit() {
 
     APP_STATE.console.running = true;
     loadToken();
+    loadPersistedOutput();
     setStatus(t("console.status.ready"));
     schedulePoll();
 }
@@ -683,7 +708,7 @@ var I18N = {
         "nav.initramfs": "Load initramfs",
         "nav.system": "System",
         "nav.backup": "Backup",
-        "nav.console": "Web console",
+        "nav.console": "Console",
         "nav.reboot": "Reboot",
         "control.language": "🌐Language",
         "control.theme": "🌓Theme",
@@ -816,7 +841,7 @@ var I18N = {
         "nav.initramfs": "加载 Initramfs",
         "nav.system": "系统",
         "nav.backup": "备份",
-        "nav.console": "网页终端",
+        "nav.console": "终端",
         "nav.reboot": "重启",
         "control.language": "🌐语言",
         "control.theme": "🌓主题",
