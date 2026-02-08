@@ -546,7 +546,13 @@ static void js_handler(enum httpd_uri_handler_status status,
 	struct httpd_response *response)
 {
 	if (status == HTTP_CB_NEW) {
-		output_plain_file(response, "main.js");
+		const char *uri = request && request->urih ? request->urih->uri : NULL;
+		const char *file = "main.js";
+
+		if (uri && strstr(uri, "i18n.js"))
+			file = "i18n.js";
+
+		output_plain_file(response, file);
 		response->info.content_type = "text/javascript";
 	}
 }
@@ -651,6 +657,9 @@ int start_web_failsafe(void)
 	httpd_register_uri_handler(inst, "/reboot", &reboot_handler, NULL);
 	httpd_register_uri_handler(inst, "/reboot.html", &html_handler, NULL);
 	httpd_register_uri_handler(inst, "/sysinfo", &sysinfo_handler, NULL);
+#ifdef CONFIG_WEBUI_FAILSAFE_I18N
+	httpd_register_uri_handler(inst, "/i18n.js", &js_handler, NULL);
+#endif
 #ifdef CONFIG_WEBUI_FAILSAFE_BACKUP
 	httpd_register_uri_handler(inst, "/backup.html", &html_handler, NULL);
 	httpd_register_uri_handler(inst, "/backup/info", &backupinfo_handler, NULL);

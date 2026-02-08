@@ -53,6 +53,10 @@ obj-y += initramfs.o
 FILE_initramfs.o := initramfs.html
 FSPATH_initramfs.o := initramfs.html
 
+obj-$(CONFIG_WEBUI_FAILSAFE_I18N) += i18n.o
+FILE_i18n.o := i18n.js
+FSPATH_i18n.o := i18n.js
+
 obj-y += main.o
 FILE_main.o := main.js
 FSPATH_main.o := main.js

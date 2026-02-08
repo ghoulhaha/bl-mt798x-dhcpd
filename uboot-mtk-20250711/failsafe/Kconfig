@@ -25,6 +25,14 @@ config WEBUI_FAILSAFE_UI_OLD
 
 endchoice
 
+config WEBUI_FAILSAFE_I18N
+	bool "Enable i18n dictionary (fsdata)"
+	default y
+	depends on WEBUI_FAILSAFE_UI_NEW
+	help
+	  Enable i18n dictionary resources for the new failsafe Web UI.
+	  When disabled, i18n.js will not be embedded or served.
+
 config WEBUI_FAILSAFE_ADVANCED
 	bool "Enable advanced features"
 	default y
