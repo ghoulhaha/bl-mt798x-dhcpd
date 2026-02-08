@@ -16,17 +16,7 @@
 #include <net/mtk_httpd.h>
 #include <net/mtk_dhcpd.h>
 #include <u-boot/md5.h>
-#include <asm/global_data.h>
-#include <linux/kernel.h>
 #include <linux/stringify.h>
-#include <linux/ctype.h>
-#ifdef CONFIG_MTD
-#include <linux/mtd/mtd.h>
-#include <linux/mtd/nand.h>
-#include <linux/mtd/spi-nor.h>
-#include <linux/mtd/spinand.h>
-#endif
-#include <limits.h>
 #include <dm/ofnode.h>
 #include <vsprintf.h>
 #include <version_string.h>
@@ -34,14 +24,13 @@
 #include "../board/mediatek/common/boot_helper.h"
 #include "fs.h"
 #include "failsafe_internal.h"
+
 #ifdef CONFIG_MTD
 #include "../board/mediatek/common/mtd_helper.h"
 #endif
 #ifdef CONFIG_MTK_BOOTMENU_MMC
 #include "../board/mediatek/common/mmc_helper.h"
 #endif
-
-DECLARE_GLOBAL_DATA_PTR;
 
 static u32 upload_data_id;
 static const void *upload_data;
