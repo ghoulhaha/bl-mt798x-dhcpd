@@ -115,28 +115,31 @@ Then it will display the GPT partition info of all GPT bin files in `mt798x_gpt_
 
 ## FIT support
 
-This function is based on 1715173329's [bl-mt798x-oss](https://github.com/1715173329/bl-mt798x-oss/tree/fit-example)
-
-I have created a patch based on his work to support FIT images.
-
-Only a limited number of models are supported. If your device is not listed, you can try to add support yourself by following his work.
-
-***BUT NOT TESTED YET!***
-
-So, **you MUST test it yourself, and there is a risk of BRICKING your device!**
+**You MUST test it yourself, and there is a risk of BRICKING your device!**
 
 There are two ways to build:
 
-1. Apply patch and build Version 2022
+```bash
+SOC=mt7981 BOARD=your_board VERSION=2025 MAINLINE=1 ./build.sh
+```
 
-    ```bash
-    git apply modify-patch/0002-uboot-2022-fit-merge-code-from-1715173329-to-support.patch
-    SOC=mt7981 BOARD=your_board VERSION=2022 ./build.sh
-    ```
+HOW to flash:
 
-2. Build via Actions
+1. Use failsafe WEB UI to backup **all your flash and partitions**, is very **important**!
 
-Open the repository's Actions tab, choose the "Build FIT BL2 and FIP" workflow, and run it.
+2. Update BL2 in the WEB UI to flash the preloader provided by OpenWrt/ImmortalWrt ubootmod firmware.
+
+3. Update U-Boot in the WEB UI to flash the **FIT version FIP**.
+
+4. Use Flash Editor in the WEB UI to erase the UBI partition
+
+5. Try upgrade in firmware upgrade page with the OpenWrt/ImmortalWrt ubootmod firmware*, if not work, try next step.
+
+6. Use failsafe WEB UI Initramfs to boot the OpenWrt/ImmortalWrt ubootmod Initramfs image
+
+7. If the device can boot into OpenWrt/ImmortalWrt successfully, then you can try upgrade in firmware upgrade page with the OpenWrt/ImmortalWrt ubootmod firmware again.
+
+> *: The OpenWrt/ImmortalWrt ubootmod firmware is a special firmware with FIT support, in this firmware, devicetree is loaded from the FIT image(bootargs = "root=/dev/fit0 rootwait";), and loaded from ubi_rootdisk. You'd better use a version after OpenWrt/ImmortalWrt 24.10.
 
 ---
 
